@@ -4,6 +4,9 @@ import usvt as USVT
 from hyperopt import hp
 from tqdm import tqdm
 
+import warnings
+np.warnings = warnings
+
 def gendata_lin_mcar(N, T, p, seed, r = 4) : 
     """ 
     Generates data using bilinear model with uniform latent factors of dimension r
@@ -74,8 +77,63 @@ def gendata_nonlin_mcar(N, T, p, seed, non_lin = "expit", r = 4):
   Data = Y
   return Data, Theta, Masking 
 
+# def test_ssplit(nsims=30, p=0.5, r=4, k=10, model="bilinear"):
+#   nsim = nsims
+#   drnn_spc = {
+#     'row_eta': hp.uniform('row_eta', 0, 3.5),
+#     'col_eta': hp.uniform('col_eta', 0, 3.5)
+#   }
+#   mcar_drnn = DRNN(eta_space = hp.uniform('eta', 0, 3.5), drnn_eta_space=drnn_spc)
+#   pools = []
+#   pools_unit = []
+#   pools_time = []
+#   pools_eta_drnn = []
+#   pools_eta_unit = []
+#   pools_eta_time = []
+#   pools_usvt = []
 
-def grow_NT(nsims = 30, p = 0.5, r = 4, k = 10, model = "bilinear", debug = False):
+#   drnn_all_ests = []
+#   unit_all_ests = []
+#   time_all_ests = []
+#   usvt_all_ests = []
+#   truth_all_vals = []
+#   for i, size_exp in enumerate(np.arange(4, 8)):
+#     print(f"{i}-th iteration")
+#     N = 2**(size_exp)
+#     T = N
+#     perf_drnn, eta_drnn = np.zeros(nsim), np.zeros([nsim, 4])
+#     perf_unit, eta_unit = np.zeros(nsim), np.zeros([nsim, 2])
+#     perf_time, eta_time = np.zeros(nsim), np.zeros([nsim, 2])
+#     perf_usvt = np.zeros(nsim)
+#     drnn_ests = []
+#     unit_ests = []
+#     time_ests = []
+#     usvt_ests = []
+#     truth_vals = []
+#     for sim in tqdm(range(nsim)):
+#       if model == "bilinear":
+#         Z, Theta, M = gendata_lin_mcar(N, T, p = p, r = r, seed = sim + 42)
+#       else:
+#         Z, Theta, M = gendata_nonlin_mcar(N, T, p = p, r = r, non_lin = model, seed = sim + 42)
+#       target_inds = [(1, 1)]
+#       est_mask = np.logical_not(M)
+#       est_mask[target_inds] = 1
+#       est_Z = np.ma.masked_array(Z, est_mask)
+
+#       # no ssplit distances
+#       rd, cd = mcar_drnn.distances(est_Z)
+
+#       eta_drnn_row_lr, eta_drnn_col_lr, eta_drnn_row_ur, eta_drnn_col_ur = mcar_drnn.search_eta_drnn(Z, 
+#                                                         Ms, 
+#                                                         fold_row_dists, 
+#                                                         fold_col_dists, 
+#                                                         seed = sim + 42, 
+#                                                         k = k,
+#                                                         max_evals=100, 
+#                                                         verbose = False)
+
+
+def grow_NT(nsims = 30, p = 0.5, r = 4, k = 10, ssplit=True, model = "bilinear", debug = False):
   nsim = nsims
   drnn_spc = {
     'row_eta': hp.uniform('row_eta', 0, 3.5),
@@ -95,7 +153,7 @@ def grow_NT(nsims = 30, p = 0.5, r = 4, k = 10, model = "bilinear", debug = Fals
   time_all_ests = []
   usvt_all_ests = []
   truth_all_vals = []
-  for i, size_exp in enumerate(np.arange(4, 6)):
+  for i, size_exp in enumerate(np.arange(4, 8)):
     print(f"{i}-th iteration")
     N = 2**(size_exp)
     T = N
@@ -110,9 +168,9 @@ def grow_NT(nsims = 30, p = 0.5, r = 4, k = 10, model = "bilinear", debug = Fals
     truth_vals = []
     for sim in tqdm(range(nsim)):
       if model == "bilinear":
-        Z, Theta, M = gendata_lin_mcar(N, T, p = p, r = r, seed = sim)
+        Z, Theta, M = gendata_lin_mcar(N, T, p = p, r = r, seed = sim + 1984)
       else:
-        Z, Theta, M = gendata_nonlin_mcar(N, T, p = p, r = r, non_lin = model, seed = sim)
+        Z, Theta, M = gendata_nonlin_mcar(N, T, p = p, r = r, non_lin = model, seed = sim + 1984)
       M_usvt = M.copy()
       obvs_inds = np.nonzero(M == 1)
       rq_lr_obvs_inds_x =  obvs_inds[0][np.logical_and(obvs_inds[0] >= N // 2, obvs_inds[1] == T - 1)]
@@ -138,7 +196,7 @@ def grow_NT(nsims = 30, p = 0.5, r = 4, k = 10, model = "bilinear", debug = Fals
         flattened_inds_lr.append((lr_rq_inds[0][b], lr_rq_inds[1][b]))
       for b in range(len(ur_rq_inds[0])):
         flattened_inds_ur.append((ur_rq_inds[0][b], ur_rq_inds[1][b]))
-    
+
       eval_mask_lr = np.logical_not(M)
       eval_mask_ur = np.logical_not(M)
 
@@ -150,8 +208,6 @@ def grow_NT(nsims = 30, p = 0.5, r = 4, k = 10, model = "bilinear", debug = Fals
       masked_Z_ur = np.ma.masked_array(Z, eval_mask_ur)
       
       #M[col_inds] = 0
-
-      
       # mask = np.logical_not(M)
       # users for lr uses ll
       lr_Z_users = np.ma.masked_array(Z[N//2:, :T//2], eval_mask_lr[N//2:, :T//2])
@@ -219,29 +275,35 @@ def grow_NT(nsims = 30, p = 0.5, r = 4, k = 10, model = "bilinear", debug = Fals
       M_cv = M.copy()
       M_cv[all_rq_inds] = 0
 
+
+        
+
       # eta search
       eta_drnn_row_lr, eta_drnn_col_lr, eta_drnn_row_ur, eta_drnn_col_ur = mcar_drnn.search_eta_drnn(Z, 
                                                              Ms, 
                                                              fold_row_dists, 
                                                              fold_col_dists, 
-                                                             seed = sim, 
+                                                             seed = sim + 1984, 
                                                              k = k,
+                                                             ssplit=ssplit,
                                                              max_evals=100, 
                                                              verbose = False)
       eta_star_row_lr, eta_star_row_ur = mcar_drnn.search_eta_snn(Z, 
                                               Ms, 
                                               nn_type = "u",
                                               dists = fold_row_dists,
-                                              seed = sim,
+                                              seed = sim + 1984,
                                               k = k, 
+                                              ssplit=ssplit,
                                               max_evals=50, 
                                               verbose = False)
       eta_star_col_lr, eta_star_col_ur = mcar_drnn.search_eta_snn(Z, 
                                               Ms, 
                                               nn_type = "i",
                                               dists = fold_col_dists,
-                                              seed = sim,
+                                              seed = sim + 1984,
                                               k = k, 
+                                              ssplit=ssplit,
                                               max_evals=50, 
                                               verbose = False)
 
@@ -272,6 +334,8 @@ def grow_NT(nsims = 30, p = 0.5, r = 4, k = 10, model = "bilinear", debug = Fals
       # true value
       #col_truth = Z[all_rq_inds]
       col_truth = Theta[all_rq_inds]
+      col_truth_lr = Theta[lr_rq_inds]
+      col_truth_ur = Theta[ur_rq_inds]
       #lr_truth = Z[lr_rq_inds]
       
       # ur_truth = Z[ur_rq_inds]
@@ -319,6 +383,11 @@ def grow_NT(nsims = 30, p = 0.5, r = 4, k = 10, model = "bilinear", debug = Fals
       Z_usvt[all_rq_inds] = np.nan
       m = USVT.usvt(Z_usvt)
       #usvt_ests[rq_inds] = m[i, j]
+      print("LR")
+      print(mcar_drnn.avg_abs_error(drnn_est[lr_rq_inds], col_truth_lr))
+      print("UR")
+      print(mcar_drnn.avg_abs_error(drnn_est[ur_rq_inds], col_truth_ur))
+      
       usvt_err = mcar_drnn.avg_abs_error(m[all_rq_inds], col_truth)
       perf_drnn[sim] = drnn_err
       perf_time[sim] = time_err
@@ -348,19 +417,19 @@ def grow_NT(nsims = 30, p = 0.5, r = 4, k = 10, model = "bilinear", debug = Fals
     usvt_all_ests.append(usvt_ests)
     truth_all_vals.append(truth_vals)
   if not debug:
-    np.save("drnn_full_etasame_ssplit_mcar_N4_5_blin_uv11_d4_p5_abs_err.npy", np.array(pools))
-    np.save("drnn_full_etasame_ssplit_mcar_N4_5_blin_uv11_d4_p5_abs_eta.npy", np.array(pools_eta_drnn))
-    np.save("drnn_full_etasame_ssplit_mcar_N4_5_blin_uv11_d4_p5_unit_abs_err.npy", np.array(pools_unit))
-    np.save("drnn_full_etasame_ssplit_mcar_N4_5_blin_uv11_d4_p5_unit_abs_eta.npy", np.array(pools_eta_unit))
-    np.save("drnn_full_etasame_ssplit_mcar_N4_5_blin_uv11_d4_p5_time_abs_err.npy", np.array(pools_time))
-    np.save("drnn_full_etasame_ssplit_mcar_N4_5_blin_uv11_d4_p5_time_abs_eta.npy", np.array(pools_eta_time))
-    np.save("drnn_full_etasame_ssplit_mcar_N4_5_blin_uv11_d4_p5_usvt_abs_err.npy", np.array(pools_usvt))
+    np.save("drnn_full_bug_ssplit_mcar_N4_7_blin_uv11_d4_p5_abs_err.npy", np.array(pools))
+    np.save("drnn_full_bug_ssplit_mcar_N4_7_blin_uv11_d4_p5_abs_eta.npy", np.array(pools_eta_drnn))
+    np.save("drnn_full_bug_ssplit_mcar_N4_7_blin_uv11_d4_p5_unit_abs_err.npy", np.array(pools_unit))
+    np.save("drnn_full_bug_ssplit_mcar_N4_7_blin_uv11_d4_p5_unit_abs_eta.npy", np.array(pools_eta_unit))
+    np.save("drnn_full_bug_ssplit_mcar_N4_7_blin_uv11_d4_p5_time_abs_err.npy", np.array(pools_time))
+    np.save("drnn_full_bug_ssplit_mcar_N4_7_blin_uv11_d4_p5_time_abs_eta.npy", np.array(pools_eta_time))
+    np.save("drnn_full_bug_ssplit_mcar_N4_7_blin_uv11_d4_p5_usvt_abs_err.npy", np.array(pools_usvt))
 
-    np.save("drnn_full_etasame_ssplit_mcar_N4_5_blin_uv11_d4_p5_estimates.npy", np.array(drnn_all_ests, dtype = object), allow_pickle=True)
-    np.save("drnn_full_etasame_ssplit_mcar_N4_5_blin_uv11_d4_p5_unit_estimates.npy", np.array(unit_all_ests, dtype = object), allow_pickle=True)
-    np.save("drnn_full_etasame_ssplit_mcar_N4_5_blin_uv11_d4_p5_time_estimates.npy", np.array(time_all_ests, dtype = object), allow_pickle=True)
-    np.save("drnn_full_etasame_ssplit_mcar_N4_5_blin_uv11_d4_p5_usvt_estimates.npy", np.array(usvt_all_ests, dtype = object), allow_pickle=True)
-    np.save("drnn_full_etasame_ssplit_mcar_N4_5_blin_uv11_d4_p5_truth_vals.npy", np.array(truth_all_vals, dtype = object), allow_pickle=True)
+    np.save("drnn_full_bug_ssplit_mcar_N4_7_blin_uv11_d4_p5_estimates.npy", np.array(drnn_all_ests, dtype = object), allow_pickle=True)
+    np.save("drnn_full_bug_ssplit_mcar_N4_7_blin_uv11_d4_p5_unit_estimates.npy", np.array(unit_all_ests, dtype = object), allow_pickle=True)
+    np.save("drnn_full_bug_ssplit_mcar_N4_7_blin_uv11_d4_p5_time_estimates.npy", np.array(time_all_ests, dtype = object), allow_pickle=True)
+    np.save("drnn_full_bug_ssplit_mcar_N4_7_blin_uv11_d4_p5_usvt_estimates.npy", np.array(usvt_all_ests, dtype = object), allow_pickle=True)
+    np.save("drnn_full_bug_ssplit_mcar_N4_7_blin_uv11_d4_p5_truth_vals.npy", np.array(truth_all_vals, dtype = object), allow_pickle=True)
 
 def fix_NT(size = 2**7, p = 0.5, model = "bilinear", r = 4, sim_seed = 42):
   sim_seed = sim_seed
@@ -495,7 +564,7 @@ def fix_NT(size = 2**7, p = 0.5, model = "bilinear", r = 4, sim_seed = 42):
   np.save("drnn_mcar_N128_tryabs_usvt_errors.npy", usvt_errs)
 
 def main():
-  grow_NT(nsims = 15, p = 0.5, debug = False)
+  grow_NT(nsims = 5, p = 0.5, debug = False)
   
 if __name__ == "__main__":
     main()
