@@ -214,7 +214,7 @@ class DRNN(NNImputer):
         flattened_inds.append((ho_inds[0][b], ho_inds[1][b]))
       estimate = self.snn_estimate(cv_Z, M, eta, flattened_inds, dist, nn_type = nn_type)
       truth = Z[ho_inds]
-      all_errs = self.avg_error(estimate[ho_inds], truth)
+      all_errs[i] = self.avg_error(estimate[ho_inds], truth)
 
     return np.nanmean(all_errs)
   
@@ -256,7 +256,6 @@ class DRNN(NNImputer):
       trials=trials,
     )
     return best_eta["row_eta"], best_eta["col_eta"]
-      
 
   def cv_drnn_ssplit(self, Z, Ms, row_dists, col_dists, seed, k = 5, max_evals = 200, verbose = True):
     np.random.seed(seed=seed)
@@ -428,7 +427,7 @@ class DRNN(NNImputer):
         )
       return best_eta_ul["eta"], best_eta_ll["eta"]
     else:
-      obvs_inds = np.nonzero(M == 1)
+      obvs_inds = np.nonzero(Ms == 1)
       obvs_inds_x = obvs_inds[0]
       obvs_inds_y = obvs_inds[1]
       rand_inds = np.arange(len(obvs_inds_x))
