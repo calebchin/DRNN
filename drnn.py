@@ -171,7 +171,7 @@ class DRNN(NNImputer):
       raise ValueError("Invalid nearest neighbors type " + str(self.nn_type))
     return ests
   
-  def cv_drnn_square(self, Z, M, folds, row_dists, col_dists, row_eta, col_eta, ssplit=True):
+  def cv_drnn_square(self, Z, M_in, folds, row_dists, col_dists, row_eta, col_eta, ssplit=True):
     """
     Tuning etas for drnn with upper right and lower right quadrant folds
     """
@@ -181,7 +181,7 @@ class DRNN(NNImputer):
     #print("In cv drnn")
     for i, ho_inds in enumerate(folds):
       # M = Ms[i % 2]
-      M = M if ssplit else M[i]
+      M = M_in if ssplit else M_in[i]
       cv_mask = np.logical_not(M)
       cv_mask[ho_inds] = 1
       cv_Z = np.ma.masked_array(Z, cv_mask)
@@ -196,7 +196,7 @@ class DRNN(NNImputer):
     
     return np.nanmean(all_errs)
 
-  def cv_snn_square(self, Z, M, folds, dists, nn_type, eta, ssplit=True):
+  def cv_snn_square(self, Z, M_in, folds, dists, nn_type, eta, ssplit=True):
     """
     Tuning eta for nn_type nearest neighbors
     """
@@ -204,7 +204,7 @@ class DRNN(NNImputer):
     tot_err = 0
     all_errs = np.full([k], np.nan)
     for i, ho_inds in enumerate(folds):
-      M = M if ssplit else M[i]
+      M = M_in if ssplit else M_in[i]
       cv_mask = np.logical_not(M)
       cv_mask[ho_inds] = 1
       cv_Z = np.ma.masked_array(Z, cv_mask)
@@ -290,14 +290,18 @@ class DRNN(NNImputer):
     ll_split_inds = np.array_split(ll_rand_inds, k)
     ll_folds = [(ll_obvs_inds_x[inds], ll_obvs_inds_y[inds]) for inds in ll_split_inds]
 
-    def obj_ll(params):
-      loss = self.cv_drnn_square(Z, Ms[1], ll_folds, row_dists[1], col_dists[1], params["row_eta"], params["col_eta"], ssplit=True)
-      #print(type(loss))
-      return loss #{"loss" : loss, "status" : STATUS_OK}
+    # print("DRNN LL Row Dists")
+    # print(row_dists[1])
+
     def obj_ul(params):
       loss = self.cv_drnn_square(Z, Ms[0], ul_folds, row_dists[0], col_dists[0], params["row_eta"], params["col_eta"], ssplit=True)
       #print(type(loss))
       return loss
+    def obj_ll(params):
+      loss = self.cv_drnn_square(Z, Ms[1], ll_folds, row_dists[1], col_dists[1], params["row_eta"], params["col_eta"], ssplit=True)
+      #print(type(loss))
+      return loss #{"loss" : loss, "status" : STATUS_OK}
+
     # ==========================
     # percentiles = np.array([5, 10, 13, 17, 20, 35, 50, 65, 80, 100])
     # eta_cand_ul_row = np.quantile(row_dists[0][np.logical_and(~np.isinf(row_dists[0]), ~np.isnan(row_dists[0]))], q = percentiles / 100)
@@ -334,6 +338,16 @@ class DRNN(NNImputer):
     # best_eta_ll = {"row_eta" : eta_cand_ll_row[r], "col_eta" : eta_cand_ll_col[c]}
 
 
+    trials_ul = Trials()
+    best_eta_ul = fmin(
+      fn=obj_ul,
+      verbose=verbose,
+      space=self.drnn_eta_space,
+      algo=self.search_algo,
+      max_evals=max_evals,
+      trials=trials_ul,
+      rstate=np.random.default_rng(seed + N)
+    )
     trials_ll = Trials()
     best_eta_ll = fmin(
       fn=obj_ll,
@@ -345,16 +359,7 @@ class DRNN(NNImputer):
       rstate=np.random.default_rng(seed + N)
     )
 
-    trials_ul = Trials()
-    best_eta_ul = fmin(
-      fn=obj_ul,
-      verbose=verbose,
-      space=self.drnn_eta_space,
-      algo=self.search_algo,
-      max_evals=max_evals,
-      trials=trials_ul,
-      rstate=np.random.default_rng(seed + N)
-    )
+
 
     return best_eta_ul["row_eta"], best_eta_ul["col_eta"], best_eta_ll["row_eta"], best_eta_ll["col_eta"]
 
@@ -397,6 +402,10 @@ class DRNN(NNImputer):
       np.random.shuffle(ll_rand_inds)
       ll_split_inds = np.array_split(ll_rand_inds, k)
       ll_folds = [(ll_obvs_inds_x[inds], ll_obvs_inds_y[inds]) for inds in ll_split_inds]
+      
+      # if nn_type == "i":
+      #   print("Time NN LL Col Dists")
+      #   print(dists[1])
 
       def obj_ul(eta):
         return self.cv_snn_square(Z, Ms[0], ul_folds, dists[0], nn_type, eta, ssplit=True)
