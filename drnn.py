@@ -218,8 +218,9 @@ class DRNN(NNImputer):
 
     return np.nanmean(all_errs)
   
-  def cv_drnn_full(self, Z, M, seed, k = 5, max_evals = 200, verbose = True):
+  def cv_drnn_full(self, Z, Ms, seed, k = 5, max_evals = 200, verbose = True):
     np.random.seed(seed=seed)
+    M = Ms[0]
     obvs_inds = np.nonzero(M == 1)
     obvs_inds_x = obvs_inds[0]
     obvs_inds_y = obvs_inds[1]
@@ -257,7 +258,7 @@ class DRNN(NNImputer):
     )
     return best_eta["row_eta"], best_eta["col_eta"]
 
-  def cv_drnn_ssplit(self, Z, Ms, row_dists, col_dists, seed, k = 5, max_evals = 200, verbose = True):
+  def cv_drnn_ssplit(self, Z, Ms, row_dists, col_dists, seed, multi_eta=True, k = 5, max_evals = 200, verbose = True):
     np.random.seed(seed=seed)
     N, T = Z.shape
     # obvs_inds_lr = np.nonzero(Ms[0] == 1)
@@ -267,7 +268,6 @@ class DRNN(NNImputer):
     # obvs_inds_ur = np.nonzero(Ms[-1] == 1)
     # ur_obvs_inds_x = obvs_inds_ur[0][np.logical_and(obvs_inds_ur[0] >= T // 2, obvs_inds_ur[1] < N // 2)]
     # ur_obvs_inds_y = obvs_inds_ur[1][np.logical_and(obvs_inds_ur[1] < N // 2, obvs_inds_ur[0] >= T // 2)]
-
     # FULL CV SPLIT ===================================
     obvs_inds_ul = np.nonzero(Ms[0] == 1)
     ul_obvs_inds_x = obvs_inds_ul[0][np.logical_and(obvs_inds_ul[1] < T // 2, obvs_inds_ul[0] < N // 2)]
@@ -337,44 +337,53 @@ class DRNN(NNImputer):
     # r, c = np.unravel_index(np.argmin(perf_ll, axis=None), perf_ll.shape)
     # best_eta_ll = {"row_eta" : eta_cand_ll_row[r], "col_eta" : eta_cand_ll_col[c]}
 
+    if multi_eta:
+      trials_ul = Trials()
+      best_eta_ul = fmin(
+        fn=obj_ul,
+        verbose=verbose,
+        space=self.drnn_eta_space,
+        algo=self.search_algo,
+        max_evals=max_evals,
+        trials=trials_ul,
+        rstate=np.random.default_rng(seed)
+      )
+      trials_ll = Trials()
+      best_eta_ll = fmin(
+        fn=obj_ll,
+        verbose=verbose,
+        space=self.drnn_eta_space,
+        algo=self.search_algo,
+        max_evals=max_evals,
+        trials=trials_ll,
+        rstate=np.random.default_rng(seed)
+      )
+      return best_eta_ul["row_eta"], best_eta_ul["col_eta"], best_eta_ll["row_eta"], best_eta_ll["col_eta"]
+    else:
+      trials_ul = Trials()
+      best_eta_ul = fmin(
+        fn=obj_ul,
+        verbose=verbose,
+        space=self.drnn_eta_space,
+        algo=self.search_algo,
+        max_evals=max_evals,
+        trials=trials_ul,
+        rstate=np.random.default_rng(seed)
+      )
+      return best_eta_ul["row_eta"], best_eta_ul["col_eta"]
 
-    trials_ul = Trials()
-    best_eta_ul = fmin(
-      fn=obj_ul,
-      verbose=verbose,
-      space=self.drnn_eta_space,
-      algo=self.search_algo,
-      max_evals=max_evals,
-      trials=trials_ul,
-      rstate=np.random.default_rng(seed + N)
-    )
-    trials_ll = Trials()
-    best_eta_ll = fmin(
-      fn=obj_ll,
-      verbose=verbose,
-      space=self.drnn_eta_space,
-      algo=self.search_algo,
-      max_evals=max_evals,
-      trials=trials_ll,
-      rstate=np.random.default_rng(seed + N)
-    )
-
-
-
-    return best_eta_ul["row_eta"], best_eta_ul["col_eta"], best_eta_ll["row_eta"], best_eta_ll["col_eta"]
-
-  def search_eta_drnn(self, Z, Ms, row_dists, col_dists, seed, k = 5, ssplit=True, max_evals = 200, verbose = True):
+  def search_eta_drnn(self, Z, Ms, row_dists, col_dists, seed, k = 5, multi_eta=True, ssplit=True, max_evals = 200, verbose = True):
     """
     Tune optimal etas
     """
     if ssplit:
-      return self.cv_drnn_ssplit(Z, Ms, row_dists, col_dists, seed, k, max_evals, verbose)
+      return self.cv_drnn_ssplit(Z, Ms, row_dists, col_dists, seed, multi_eta, k, max_evals, verbose)
     else:
       return self.cv_drnn_full(Z, Ms, seed, k, max_evals, verbose)
     
     
 
-  def search_eta_snn(self, Z, Ms, nn_type, dists, seed, ssplit=True, k = 5, max_evals=200, verbose=True):
+  def search_eta_snn(self, Z, Ms, nn_type, dists, seed, multi_eta=True, ssplit=True, k = 5, max_evals=200, verbose=True):
     """
     Tune optimal eta
     """
@@ -406,37 +415,50 @@ class DRNN(NNImputer):
       # if nn_type == "i":
       #   print("Time NN LL Col Dists")
       #   print(dists[1])
-
       def obj_ul(eta):
         return self.cv_snn_square(Z, Ms[0], ul_folds, dists[0], nn_type, eta, ssplit=True)
       
       def obj_ll(eta):
         return self.cv_snn_square(Z, Ms[1], ll_folds, dists[1], nn_type, eta, ssplit=True)
-      
-      trials_ul = Trials()
-      best_eta_ul = fmin(
-        fn=obj_ul,
-        verbose=verbose,
-        space=self.eta_space,
-        algo=self.search_algo,
-        max_evals=max_evals,
-        trials=trials_ul,
-        rstate=np.random.default_rng(seed + N)
-      )
-
-      trials_ll = Trials()
-      best_eta_ll = fmin(
-        fn=obj_ll,
-        verbose=verbose,
-        space=self.eta_space,
-        algo=self.search_algo,
-        max_evals=max_evals,
-        trials=trials_ll,
-        rstate=np.random.default_rng(seed + N)
+      if multi_eta:
+        trials_ul = Trials()
+        best_eta_ul = fmin(
+          fn=obj_ul,
+          verbose=verbose,
+          space=self.eta_space,
+          algo=self.search_algo,
+          max_evals=max_evals,
+          trials=trials_ul,
+          rstate=np.random.default_rng(seed)
         )
-      return best_eta_ul["eta"], best_eta_ll["eta"]
+
+        trials_ll = Trials()
+        best_eta_ll = fmin(
+          fn=obj_ll,
+          verbose=verbose,
+          space=self.eta_space,
+          algo=self.search_algo,
+          max_evals=max_evals,
+          trials=trials_ll,
+          rstate=np.random.default_rng(seed)
+          )
+        return best_eta_ul["eta"], best_eta_ll["eta"]
+      else:
+        trials_ul = Trials()
+        best_eta_ul = fmin(
+          fn=obj_ul,
+          verbose=verbose,
+          space=self.eta_space,
+          algo=self.search_algo,
+          max_evals=max_evals,
+          trials=trials_ul,
+          rstate=np.random.default_rng(seed)
+        )
+        return best_eta_ul["eta"]
+
     else:
-      obvs_inds = np.nonzero(Ms == 1)
+      M = Ms[0]
+      obvs_inds = np.nonzero(M == 1)
       obvs_inds_x = obvs_inds[0]
       obvs_inds_y = obvs_inds[1]
       rand_inds = np.arange(len(obvs_inds_x))
@@ -448,7 +470,7 @@ class DRNN(NNImputer):
       dists = []
       Ms_fold = []
       for f in folds:
-        cv_M = Ms.copy()
+        cv_M = M.copy()
         cv_M[f] = 0
         Ms_fold.append(cv_M)
         cv_Z = np.ma.masked_array(Z, np.logical_not(cv_M))
