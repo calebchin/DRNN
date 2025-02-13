@@ -64,28 +64,28 @@ class DRNN(NNImputer):
           col_Z = np.swapaxes(Z_masked, 0, 1)
           Z_br_col = col_Z[:, None]
           Z_br_row = Z_masked[:, None]
-          row_dists = np.mean((Z_br_row - Z_masked)**2, axis = 2)
-          col_dists = np.mean((Z_br_col - col_Z)**2, axis = 2)
+          row_dists = np.nanmean((Z_br_row - Z_masked)**2, axis = 2)
+          col_dists = np.nanmean((Z_br_col - col_Z)**2, axis = 2)
           np.fill_diagonal(row_dists, np.inf)
           np.fill_diagonal(col_dists, np.inf)
           return (row_dists.filled(np.nan), col_dists.filled(np.nan))
       elif dist_type == "single entry":
           entry_row = Z_masked[i]
           entry_col = Z_masked[:, t]
-          row_dists = np.mean((entry_row - Z_masked)**2, axis = 1)
-          col_dists = np.mean((entry_col - np.swapaxes(Z_masked, 0, 1))**2, axis = 1)
+          row_dists = np.nanmean((entry_row - Z_masked)**2, axis = 1)
+          col_dists = np.nanmean((entry_col - np.swapaxes(Z_masked, 0, 1))**2, axis = 1)
           row_dists[i] = np.inf
           col_dists[i] = np.inf
           return row_dists.filled(np.nan), col_dists.filled(np.nan)
       elif dist_type == "u":
         Z_br_row = Z_masked[:, None]
-        row_dists = np.mean((Z_br_row - Z_masked)**2, axis = 2)
+        row_dists = np.nanmean((Z_br_row - Z_masked)**2, axis = 2)
         np.fill_diagonal(row_dists, np.inf)
         return row_dists.filled(np.nan)
       elif dist_type == "i":
         col_Z = np.swapaxes(Z_masked, 0, 1)
         Z_br_col = col_Z[:, None]
-        col_dists = np.mean((Z_br_col - col_Z)**2, axis = 2)
+        col_dists = np.nanmean((Z_br_col - col_Z)**2, axis = 2)
         np.fill_diagonal(col_dists, np.inf)
         return col_dists.filled(np.nan)
       
@@ -97,6 +97,7 @@ class DRNN(NNImputer):
     -----------
     Z : a (masked) matrix of size N x T
     """
+    Z = Z.copy()
     N, T = Z.shape
     s_time_nn_all = col_dists <= eta_cols  # Shape (T, T)
     s_unit_nn_all = row_dists <= eta_rows  # Shape (N, N)
@@ -258,7 +259,7 @@ class DRNN(NNImputer):
     )
     return best_eta["row_eta"], best_eta["col_eta"]
 
-  def cv_drnn_ssplit(self, Z, Ms, row_dists, col_dists, seed, multi_eta=True, k = 5, max_evals = 200, verbose = True):
+  def cv_drnn_ssplit(self, Z, Ms, row_dists, col_dists, seed, folds=None, multi_eta=True, k = 5, max_evals = 200, verbose = True):
     np.random.seed(seed=seed)
     N, T = Z.shape
     # obvs_inds_lr = np.nonzero(Ms[0] == 1)
@@ -269,36 +270,37 @@ class DRNN(NNImputer):
     # ur_obvs_inds_x = obvs_inds_ur[0][np.logical_and(obvs_inds_ur[0] >= T // 2, obvs_inds_ur[1] < N // 2)]
     # ur_obvs_inds_y = obvs_inds_ur[1][np.logical_and(obvs_inds_ur[1] < N // 2, obvs_inds_ur[0] >= T // 2)]
     # FULL CV SPLIT ===================================
-    obvs_inds_ul = np.nonzero(Ms[0] == 1)
-    ul_obvs_inds_x = obvs_inds_ul[0][np.logical_and(obvs_inds_ul[1] < T // 2, obvs_inds_ul[0] < N // 2)]
-    ul_obvs_inds_y = obvs_inds_ul[1][np.logical_and(obvs_inds_ul[0] < N // 2, obvs_inds_ul[1] < T // 2)]
-    ul_inds = (ul_obvs_inds_x, ul_obvs_inds_y)
-    # lr_inds = (lr_obvs_inds_x, lr_obvs_inds_y)
+    if folds is None:
+      obvs_inds_ul = np.nonzero(Ms[0] == 1)
+      ul_obvs_inds_x = obvs_inds_ul[0][np.logical_and(obvs_inds_ul[1] < T // 2, obvs_inds_ul[0] < N // 2)]
+      ul_obvs_inds_y = obvs_inds_ul[1][np.logical_and(obvs_inds_ul[0] < N // 2, obvs_inds_ul[1] < T // 2)]
+      ul_inds = (ul_obvs_inds_x, ul_obvs_inds_y)
+      # lr_inds = (lr_obvs_inds_x, lr_obvs_inds_y)
 
-    obvs_inds_ll = np.nonzero(Ms[1] == 1)
-    ll_obvs_inds_x = obvs_inds_ll[0][np.logical_and(obvs_inds_ll[1] < T // 2, obvs_inds_ll[0] >= N // 2)]
-    ll_obvs_inds_y = obvs_inds_ll[1][np.logical_and(obvs_inds_ll[0] >= N // 2, obvs_inds_ll[1] < T // 2)]
+      obvs_inds_ll = np.nonzero(Ms[1] == 1)
+      ll_obvs_inds_x = obvs_inds_ll[0][np.logical_and(obvs_inds_ll[1] < T // 2, obvs_inds_ll[0] >= N // 2)]
+      ll_obvs_inds_y = obvs_inds_ll[1][np.logical_and(obvs_inds_ll[0] >= N // 2, obvs_inds_ll[1] < T // 2)]
 
-    # five fold cv over obvs inds in ul
-    rand_inds = np.arange(len(ul_obvs_inds_x))
-    np.random.shuffle(rand_inds)
-    split_inds = np.array_split(rand_inds, k)
-    ul_folds = [(ul_obvs_inds_x[inds], ul_obvs_inds_y[inds]) for inds in split_inds]
+      # five fold cv over obvs inds in ul
+      rand_inds = np.arange(len(ul_obvs_inds_x))
+      np.random.shuffle(rand_inds)
+      split_inds = np.array_split(rand_inds, k)
+      ul_folds = [(ul_obvs_inds_x[inds], ul_obvs_inds_y[inds]) for inds in split_inds]
 
-    ll_rand_inds = np.arange(len(ll_obvs_inds_x))
-    np.random.shuffle(ll_rand_inds)
-    ll_split_inds = np.array_split(ll_rand_inds, k)
-    ll_folds = [(ll_obvs_inds_x[inds], ll_obvs_inds_y[inds]) for inds in ll_split_inds]
-
+      ll_rand_inds = np.arange(len(ll_obvs_inds_x))
+      np.random.shuffle(ll_rand_inds)
+      ll_split_inds = np.array_split(ll_rand_inds, k)
+      ll_folds = [(ll_obvs_inds_x[inds], ll_obvs_inds_y[inds]) for inds in ll_split_inds]
+      folds = [ul_folds, ll_folds]
     # print("DRNN LL Row Dists")
     # print(row_dists[1])
 
-    def obj_ul(params):
-      loss = self.cv_drnn_square(Z, Ms[0], ul_folds, row_dists[0], col_dists[0], params["row_eta"], params["col_eta"], ssplit=True)
+    def obj_1(params):
+      loss = self.cv_drnn_square(Z, Ms[0], folds[0], row_dists[0], col_dists[0], params["row_eta"], params["col_eta"], ssplit=True)
       #print(type(loss))
       return loss
-    def obj_ll(params):
-      loss = self.cv_drnn_square(Z, Ms[1], ll_folds, row_dists[1], col_dists[1], params["row_eta"], params["col_eta"], ssplit=True)
+    def obj_2(params):
+      loss = self.cv_drnn_square(Z, Ms[1], folds[1], row_dists[1], col_dists[1], params["row_eta"], params["col_eta"], ssplit=True)
       #print(type(loss))
       return loss #{"loss" : loss, "status" : STATUS_OK}
 
@@ -338,52 +340,52 @@ class DRNN(NNImputer):
     # best_eta_ll = {"row_eta" : eta_cand_ll_row[r], "col_eta" : eta_cand_ll_col[c]}
 
     if multi_eta:
-      trials_ul = Trials()
-      best_eta_ul = fmin(
-        fn=obj_ul,
+      trials_1 = Trials()
+      best_eta_1 = fmin(
+        fn=obj_1,
         verbose=verbose,
         space=self.drnn_eta_space,
         algo=self.search_algo,
         max_evals=max_evals,
-        trials=trials_ul,
+        trials=trials_1,
         rstate=np.random.default_rng(seed)
       )
-      trials_ll = Trials()
-      best_eta_ll = fmin(
-        fn=obj_ll,
+      trials_2 = Trials()
+      best_eta_2 = fmin(
+        fn=obj_2,
         verbose=verbose,
         space=self.drnn_eta_space,
         algo=self.search_algo,
         max_evals=max_evals,
-        trials=trials_ll,
+        trials=trials_2,
         rstate=np.random.default_rng(seed)
       )
-      return best_eta_ul["row_eta"], best_eta_ul["col_eta"], best_eta_ll["row_eta"], best_eta_ll["col_eta"]
+      return best_eta_1["row_eta"], best_eta_1["col_eta"], best_eta_2["row_eta"], best_eta_2["col_eta"]
     else:
-      trials_ul = Trials()
-      best_eta_ul = fmin(
-        fn=obj_ul,
+      trials_1 = Trials()
+      best_eta_1 = fmin(
+        fn=obj_1,
         verbose=verbose,
         space=self.drnn_eta_space,
         algo=self.search_algo,
         max_evals=max_evals,
-        trials=trials_ul,
+        trials=trials_1,
         rstate=np.random.default_rng(seed)
       )
-      return best_eta_ul["row_eta"], best_eta_ul["col_eta"]
+      return best_eta_1["row_eta"], best_eta_1["col_eta"]
 
-  def search_eta_drnn(self, Z, Ms, row_dists, col_dists, seed, k = 5, multi_eta=True, ssplit=True, max_evals = 200, verbose = True):
+  def search_eta_drnn(self, Z, Ms, row_dists, col_dists, seed, folds = None, k = 5, multi_eta=True, ssplit=True, max_evals = 200, verbose = True):
     """
     Tune optimal etas
     """
     if ssplit:
-      return self.cv_drnn_ssplit(Z, Ms, row_dists, col_dists, seed, multi_eta, k, max_evals, verbose)
+      return self.cv_drnn_ssplit(Z, Ms, row_dists, col_dists, seed, folds, multi_eta, k, max_evals, verbose)
     else:
       return self.cv_drnn_full(Z, Ms, seed, k, max_evals, verbose)
     
     
 
-  def search_eta_snn(self, Z, Ms, nn_type, dists, seed, multi_eta=True, ssplit=True, k = 5, max_evals=200, verbose=True):
+  def search_eta_snn(self, Z, Ms, nn_type, dists, seed, folds=None, multi_eta=True, ssplit=True, k = 5, max_evals=200, verbose=True):
     """
     Tune optimal eta
     """
@@ -391,70 +393,71 @@ class DRNN(NNImputer):
     np.random.seed(seed=seed)
     N, T = Z.shape
     if ssplit:
-      obvs_inds_ul = np.nonzero(Ms[0] == 1)
-      ul_obvs_inds_x = obvs_inds_ul[0][np.logical_and(obvs_inds_ul[1] < T // 2, obvs_inds_ul[0] < N // 2)]
-      ul_obvs_inds_y = obvs_inds_ul[1][np.logical_and(obvs_inds_ul[0] < N // 2, obvs_inds_ul[1] < T // 2)]
-      # ul_inds = (ul_obvs_inds_x, ul_obvs_inds_y)
-      # lr_inds = (lr_obvs_inds_x, lr_obvs_inds_y)
+      if folds is None:
+        obvs_inds_ul = np.nonzero(Ms[0] == 1)
+        ul_obvs_inds_x = obvs_inds_ul[0][np.logical_and(obvs_inds_ul[1] < T // 2, obvs_inds_ul[0] < N // 2)]
+        ul_obvs_inds_y = obvs_inds_ul[1][np.logical_and(obvs_inds_ul[0] < N // 2, obvs_inds_ul[1] < T // 2)]
+        # ul_inds = (ul_obvs_inds_x, ul_obvs_inds_y)
+        # lr_inds = (lr_obvs_inds_x, lr_obvs_inds_y)
 
-      obvs_inds_ll = np.nonzero(Ms[1] == 1)
-      ll_obvs_inds_x = obvs_inds_ll[0][np.logical_and(obvs_inds_ll[1] < T // 2, obvs_inds_ll[0] >= N // 2)]
-      ll_obvs_inds_y = obvs_inds_ll[1][np.logical_and(obvs_inds_ll[0] >= N // 2, obvs_inds_ll[1] < T // 2)]
+        obvs_inds_ll = np.nonzero(Ms[1] == 1)
+        ll_obvs_inds_x = obvs_inds_ll[0][np.logical_and(obvs_inds_ll[1] < T // 2, obvs_inds_ll[0] >= N // 2)]
+        ll_obvs_inds_y = obvs_inds_ll[1][np.logical_and(obvs_inds_ll[0] >= N // 2, obvs_inds_ll[1] < T // 2)]
 
-      # five fold cv over obvs inds in ul
-      rand_inds = np.arange(len(ul_obvs_inds_x))
-      np.random.shuffle(rand_inds)
-      split_inds = np.array_split(rand_inds, k)
-      ul_folds = [(ul_obvs_inds_x[inds], ul_obvs_inds_y[inds]) for inds in split_inds]
+        # five fold cv over obvs inds in ul
+        rand_inds = np.arange(len(ul_obvs_inds_x))
+        np.random.shuffle(rand_inds)
+        split_inds = np.array_split(rand_inds, k)
+        ul_folds = [(ul_obvs_inds_x[inds], ul_obvs_inds_y[inds]) for inds in split_inds]
 
-      ll_rand_inds = np.arange(len(ll_obvs_inds_x))
-      np.random.shuffle(ll_rand_inds)
-      ll_split_inds = np.array_split(ll_rand_inds, k)
-      ll_folds = [(ll_obvs_inds_x[inds], ll_obvs_inds_y[inds]) for inds in ll_split_inds]
-      
+        ll_rand_inds = np.arange(len(ll_obvs_inds_x))
+        np.random.shuffle(ll_rand_inds)
+        ll_split_inds = np.array_split(ll_rand_inds, k)
+        ll_folds = [(ll_obvs_inds_x[inds], ll_obvs_inds_y[inds]) for inds in ll_split_inds]
+        folds = [ul_folds, ll_folds]
       # if nn_type == "i":
       #   print("Time NN LL Col Dists")
       #   print(dists[1])
-      def obj_ul(eta):
-        return self.cv_snn_square(Z, Ms[0], ul_folds, dists[0], nn_type, eta, ssplit=True)
+      def obj_1(eta):
+        return self.cv_snn_square(Z, Ms[0], folds[0], dists[0], nn_type, eta, ssplit=True)
       
-      def obj_ll(eta):
-        return self.cv_snn_square(Z, Ms[1], ll_folds, dists[1], nn_type, eta, ssplit=True)
+      def obj_2(eta):
+        return self.cv_snn_square(Z, Ms[1], folds[1], dists[1], nn_type, eta, ssplit=True)
       if multi_eta:
-        trials_ul = Trials()
-        best_eta_ul = fmin(
-          fn=obj_ul,
+        trials_1 = Trials()
+        best_eta_1 = fmin(
+          fn=obj_1,
           verbose=verbose,
           space=self.eta_space,
           algo=self.search_algo,
           max_evals=max_evals,
-          trials=trials_ul,
+          trials=trials_1,
           rstate=np.random.default_rng(seed)
         )
 
-        trials_ll = Trials()
-        best_eta_ll = fmin(
-          fn=obj_ll,
+        trials_2 = Trials()
+        best_eta_2 = fmin(
+          fn=obj_2,
           verbose=verbose,
           space=self.eta_space,
           algo=self.search_algo,
           max_evals=max_evals,
-          trials=trials_ll,
+          trials=trials_2,
           rstate=np.random.default_rng(seed)
           )
-        return best_eta_ul["eta"], best_eta_ll["eta"]
+        return best_eta_1["eta"], best_eta_2["eta"]
       else:
-        trials_ul = Trials()
-        best_eta_ul = fmin(
-          fn=obj_ul,
+        trials_1 = Trials()
+        best_eta_1 = fmin(
+          fn=obj_1,
           verbose=verbose,
           space=self.eta_space,
           algo=self.search_algo,
           max_evals=max_evals,
-          trials=trials_ul,
+          trials=trials_1,
           rstate=np.random.default_rng(seed)
         )
-        return best_eta_ul["eta"]
+        return best_eta_1["eta"]
 
     else:
       M = Ms[0]
@@ -524,10 +527,10 @@ class DRNN(NNImputer):
     
 
   def avg_error(self, est, truth):
-     return np.mean((est - truth)**2)
+     return np.nanmean((est - truth)**2)
 
   def avg_abs_error(self, est, truth):
-    return np.mean(np.abs(est - truth))
+    return np.nanmean(np.abs(est - truth))
   
   def all_abs_error(self, est, truth):
     return np.abs(est - truth)

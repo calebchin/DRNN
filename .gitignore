@@ -1,3 +1,7 @@
 experimental_results
 plots
 __pycache__
+ssplit_results
+*.npy
+*.pdf
+.DS_Store
